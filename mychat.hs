@@ -47,29 +47,30 @@ newServer = do
   return Server {clients = c }
 
 broadcast :: Server -> Message -> STM ()
-broadcast Server{..} msg = do -- ???????????????????????????????
+broadcast Server{..} msg = do 
   clientmap <- readTVar clients
-  mapM_ (\client -> sendMessage client msg) (Map.elems clientmap) -- Map k a -> [a] Return all elements of the map in the ascending order of their keys.
+  mapM_ (\client -> sendMessage client msg) (Map.elems clientmap) 
 
 checkAddClient :: Server -> ClientName -> Handle -> IO (Maybe Client)
-checkAddClient server@Server{..} name handle = atomically $ do -- @ - именованный образец
+checkAddClient server@Server{..} name handle = atomically $ do 
   clientmap <- readTVar clients
-  if Map.member name clientmap -- Ord k => k -> Map k a -> Bool Is the key a member of the map?
+  if Map.member name clientmap 
     then return Nothing
-    else do client <- newClient name handle --  Ord k => k -> a -> Map k a -> Map k a Insert a new key and value in the map.
+    else do client <- newClient name handle 
             writeTVar clients $ Map.insert name client clientmap
             broadcast server  $ Notice (name ++ " has connected")
             return (Just client)
 
 removeClient :: Server -> ClientName -> IO ()
 removeClient server@Server{..} name = atomically $ do
-  modifyTVar' clients $ Map.delete name -- TVar a -> (a -> a) -> STM ()
+  modifyTVar' clients $ Map.delete name 
   broadcast server $ Notice (name ++ " has disconnected")
 
 talk :: Handle -> Server -> IO ()
 talk handle server@Server{..} = do
   hSetNewlineMode handle universalNewlineMode
   hSetBuffering handle LineBuffering
+  hPutStrLn handle "Haskell Chat. /help for help"
   readName
  where
   readName = do
@@ -117,13 +118,13 @@ handleMessage server client@Client{..} message =
      Command msg ->
        case words msg of
            "/kick" : who : reason -> do
-               atomically $ kick server who (unwords reason)
+               atomically $ kick server client who (unwords reason)
                return True
            "/tell" : who : what -> do
                atomically $ tell server  who $ Tell clientName (unwords what)
                return True
            ["/help"] -> do
-               hPutStrLn clientHandle $ "Command:\n/kick - Disconnects user name.\n/tell name message - Sends message to the user name.\n/users name reason - list of online users\n/quit - Disconnect yourself."
+               hPutStrLn clientHandle $ "Command:\n/kick who reason - Disconnects user name.\n/tell name message - Sends message to the user name.\n/users name reason - list of online users\n/quit - Disconnect yourself."
                return True
            ["/quit"] ->
                return False
@@ -144,34 +145,18 @@ tell Server{..} name msg = do
   clientmap <- readTVar clients
   mapM_ (\client -> sendMessage client msg) (Map.lookup name clientmap)  
 
-kick server@Server{..} name msg = do
+kick server@Server{..} client@Client{..} name msg = do
   clientmap <- readTVar clients
-  mapM_ (\client -> kickspec client msg) (Map.lookup name clientmap)
-kickspec Client{..} msg = do
-  writeTVar clientKicked (Just msg)
+  k <- readTVar clientKicked
+  case k of
+    Nothing -> do
+      mapM_ (\Client{..} -> writeTVar clientKicked (Just msg)) (Map.lookup name clientmap)
+    Just _ -> mapM_ (\Client{..} -> writeTVar clientKicked Nothing) (Map.lookup name clientmap)
 
 user :: Server -> Client -> String -> STM()
 user server@Server{..} client@Client{..} name = do
   clientmap <- readTVar clients
   mapM_ (\Client{..} -> tell server name $ Notice clientName) (Map.elems clientmap)
-
-{-list str Client{..} = str ++ clientName
-listUser clientmap = foldl' list "" clientmap 
-
-kick server@Server{..} name msg = do
-  clientmap <- readTVar clients
-  Client{..} <- (Map.lookup clientname clientmap)
-  k <- readTVar clientKicked
-  case k of
-   Nothing -> do
-  mapM_ (\client -> kickspec client msg) (Map.lookup name clientmap)
-      --writeTVar clientKicked (Just "You was disconnected")
-      --modifyTVar' clients $ Map.delete name -- TVar a -> (a -> a) -> STM ()
-      --removeClient server name
-      --tell server clientname $ Notice "Client was disconnected at your desire"
-    --Just reason -> do 
-      --tell server clientname $ Notice "Sorry! You was disconnected."
--}      
 
 main :: IO ()
 main = withSocketsDo $ do
@@ -181,10 +166,11 @@ main = withSocketsDo $ do
   forever $ do
       (handle, host, port) <- accept sock
       printf "Accepted connection from %s: %s\n" host (show port)
-      forkFinally (talk handle server) (\_ -> hClose handle) -- СООБЩЕНИЕ О ЗАКРЫТИИ
+      forkFinally (talk handle server) (\_ -> hClose handle)
 
 port :: Int
 port = 44444 
+
 -- newTVar :: a -> STM (TVar a)
 -- newTVarIO :: a -> IO (TVar a)
 -- readTVar :: TVar a -> STM a
